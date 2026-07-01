@@ -1,0 +1,19 @@
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+# Scanner runtime artifacts
+/.DS_Store
+/artifacts/
+/xpath-result.xlsx
+/xpath-rows.json
+/xpath-progress.json
+/xpath-debug.log
+
+# Local Chrome profile used for CDP login session
+/taobao-profile/
