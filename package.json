@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "scan": "ts-node --project tsconfig.json src/scan-current-page.ts",
-    "test:unit": "node --test -r ts-node/register tests/element-semantics.test.ts",
+    "test:unit": "node --test -r ts-node/register tests/*.test.ts",
     "test:cdp": "playwright test tests/qn-cdp.spec.ts --headed",
     "report": "playwright show-report"
   },

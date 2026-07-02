@@ -17,6 +17,10 @@ import {
 import { excludeElementRows } from './row-filter';
 import { formatFramedXPath, isForbiddenFrameUrl } from './frame-locator';
 import {
+  parseInteractiveCommand,
+  resolveRescanOutputPath,
+} from './rescan-command';
+import {
   buildContainerContextXPathCandidates,
   buildFieldLabelXPathCandidates,
   isStableStaticContextText,
@@ -204,7 +208,7 @@ function writeProgress(progress: Progress): void {
   fs.writeFileSync(PROGRESS_JSON, JSON.stringify(progress, null, 2), 'utf8');
 }
 
-function writeExcel(rows: OutputRow[]): void {
+function writeExcel(rows: OutputRow[], outputPath: string = RESULT_XLSX): void {
   const normalizedRows = rows.map((row) => {
     const r = { ...row };
     r.平台 = '天猫';
@@ -218,7 +222,7 @@ function writeExcel(rows: OutputRow[]): void {
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'XPath清单');
-  XLSX.writeFile(workbook, RESULT_XLSX);
+  XLSX.writeFile(workbook, outputPath);
 }
 
 function mergeRows(existing: OutputRow[], incoming: OutputRow[]): { merged: OutputRow[]; added: number; updated: number; skipped: number } {
@@ -1190,10 +1194,46 @@ async function printPages(browser: Browser): Promise<void> {
 function printHelp(): void {
   console.log('可用命令:');
   console.log('  scan   扫描当前激活页面');
+  console.log('  rescan --文件名.xlsx  补扫当前激活页面，仅生成独立 Excel，不更新正式结果和进度');
   console.log('  url    打印当前页面 URL 和标题');
   console.log('  pages  列出当前 Chrome 中打开的页面');
   console.log('  help   显示帮助');
   console.log('  exit   退出脚本');
+}
+
+async function executeRescan(browser: Browser, argument: string): Promise<void> {
+  const outputPath = resolveRescanOutputPath(ROOT, argument);
+  const page = await pickActivePage(browser);
+  if (!page) {
+    console.log('未发现可用页面，请先手动打开业务页面。');
+    return;
+  }
+
+  const forbidden = isForbiddenForScan(page.url());
+  if (forbidden) {
+    console.log(forbidden);
+    return;
+  }
+
+  const title = await page.title();
+  if (!normalizeText(title)) {
+    console.log('当前页面标题为空，可能还在加载，请稍后再试。');
+    return;
+  }
+
+  const scanResult = await collectRows(page);
+  if (!scanResult.rows.length) {
+    console.log('未采集到可写入元素，请确认页面已加载且存在可点击控件。');
+    return;
+  }
+
+  const isolatedRows = mergeRows([], scanResult.rows).merged;
+  writeExcel(isolatedRows, outputPath);
+  logDebug(`rescan ok: page=${scanResult.pagePath} rows=${isolatedRows.length}`);
+
+  console.log(`补扫完成: ${scanResult.pagePath}`);
+  console.log(`本次共 ${isolatedRows.length} 条，已写入独立文件 ${path.basename(outputPath)}`);
+  console.log('正式结果和进度文件未更新。');
 }
 
 async function executeScan(browser: Browser): Promise<void> {
@@ -1266,11 +1306,13 @@ async function main(): Promise<void> {
   rl.prompt();
 
   rl.on('line', async (line) => {
-    const cmd = normalizeText(line).toLowerCase();
+    const { command: cmd, argument } = parseInteractiveCommand(line);
 
     try {
       if (cmd === 'scan') {
         await executeScan(browser);
+      } else if (cmd === 'rescan') {
+        await executeRescan(browser, argument);
       } else if (cmd === 'url') {
         await printCurrentUrl(browser);
       } else if (cmd === 'pages') {
