@@ -14,6 +14,7 @@ node_modules/
 /xpath-rows.json
 /xpath-progress.json
 /xpath-debug.log
+/.worktrees/
 
 # Local Chrome profile used for CDP login session
 /taobao-profile/
