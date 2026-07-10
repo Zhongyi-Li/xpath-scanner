@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
-import { chromium, type Browser, type Frame, type Page } from 'playwright';
+import type { Browser, Frame, Page } from 'playwright';
 import * as XLSX from 'xlsx';
 
+import { connectToLocalChrome } from './cdp-connection';
 import { buildOutputColumnWidths } from './excel-layout';
 import {
   buildElementPath,
@@ -1293,7 +1294,7 @@ async function executeScan(browser: Browser): Promise<void> {
 async function main(): Promise<void> {
   console.log('正在连接本地 Chrome: http://127.0.0.1:9222');
 
-  const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
+  const browser = await connectToLocalChrome();
   logDebug('connected cdp browser');
 
   const rl = readline.createInterface({
