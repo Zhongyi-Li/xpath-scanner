@@ -27,6 +27,10 @@ import {
   isStableStaticContextText,
 } from './xpath-context';
 import { selectStableXPath, type XPathCandidate } from './xpath-selection';
+import {
+  FORBIDDEN_URL_PARTS,
+  SENSITIVE_FIELD_PATTERN_SOURCE,
+} from './scan-policy';
 
 type OutputRow = {
   页面路径: string;
@@ -106,18 +110,6 @@ const XSLX_COLUMNS: Array<keyof OutputRow> = [
   '平台',
   '成功标志',
   '适用流程',
-];
-
-const FORBIDDEN_URL_PARTS = [
-  'login.taobao.com',
-  'loginmyseller.taobao.com',
-  'passport',
-  'captcha',
-  'verify',
-  'localhost:9323',
-  'playwright-report',
-  'about:blank',
-  'chrome://',
 ];
 
 function nowISO(): string {
@@ -310,7 +302,7 @@ async function collectDocumentSnapshot(
   target: Page | Frame,
   includePageHierarchy: boolean,
 ): Promise<DocumentSnapshot> {
-  const snapshot = await target.evaluate((includeHierarchy) => {
+  const snapshot = await target.evaluate(({ includeHierarchy, sensitiveFieldPatternSource }) => {
     const hiddenExpr = "not(ancestor::*[@aria-hidden='true']) and not(ancestor::*[@hidden]) and not(ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' hidden ')])";
 
     const selector = [
@@ -368,6 +360,24 @@ async function collectDocumentSnapshot(
       const disabledAttr = control.getAttribute('disabled');
       const ariaDisabled = control.getAttribute('aria-disabled');
       return disabledAttr !== null || ariaDisabled === 'true';
+    }
+
+    function isSensitiveEditableControl(el: HTMLElement): boolean {
+      const control = el.matches('label')
+        ? el.querySelector<HTMLElement>('input, textarea') ?? el
+        : el;
+      const tag = control.tagName.toLowerCase();
+      if (tag !== 'input' && tag !== 'textarea') return false;
+      if (normalizeText(control.getAttribute('type')).toLowerCase() === 'password') return true;
+
+      const attributes = [
+        control.getAttribute('name'),
+        control.getAttribute('id'),
+        control.getAttribute('aria-label'),
+        control.getAttribute('placeholder'),
+        control.getAttribute('autocomplete'),
+      ].map(normalizeText);
+      return new RegExp(sensitiveFieldPatternSource, 'i').test(attributes.join(' '));
     }
 
     function normalizeText(input: string | null | undefined): string {
@@ -868,6 +878,7 @@ async function collectDocumentSnapshot(
     for (const el of uniq) {
       if (!isVisible(el)) continue;
       if (isDisabled(el)) continue;
+      if (isSensitiveEditableControl(el)) continue;
 
       const tableInfo = tableInfoFor(el);
       if (tableInfo.region === 'row-dynamic') continue;
@@ -883,7 +894,7 @@ async function collectDocumentSnapshot(
       const aria = normalizeText(el.getAttribute('aria-label'));
       const placeholder = normalizeText(el.getAttribute('placeholder'));
       const title = normalizeText(el.getAttribute('title'));
-      const value = normalizeText((el as HTMLInputElement).value);
+      const value = '';
       const fieldLabel = fieldLabelFor(el);
       const dateRangeInfo = dateRangeInfoFor(el);
       const effectiveRole = el.matches('[class*="mod-select-"] .selected-wrap')
@@ -898,7 +909,7 @@ async function collectDocumentSnapshot(
                 ? 'table-row-action'
               : normalizeText(el.getAttribute('role'));
 
-      const nameSource = text || aria || placeholder || title || fieldLabel || value;
+      const nameSource = text || aria || placeholder || title || fieldLabel;
       if (!nameSource) continue;
 
       const xpathCandidates = buildXPathCandidates(el, text, tableInfo);
@@ -937,7 +948,7 @@ async function collectDocumentSnapshot(
       items,
       hierarchySegments: collectHierarchySegments(),
     };
-  }, includePageHierarchy);
+  }, { includeHierarchy: includePageHierarchy, sensitiveFieldPatternSource: SENSITIVE_FIELD_PATTERN_SOURCE });
 
   for (const item of snapshot.items) {
     if (item.xpathCandidates.some((candidate) => candidate.count === 1)) continue;
@@ -1216,12 +1227,6 @@ async function executeRescan(browser: Browser, argument: string): Promise<void> 
     return;
   }
 
-  const title = await page.title();
-  if (!normalizeText(title)) {
-    console.log('当前页面标题为空，可能还在加载，请稍后再试。');
-    return;
-  }
-
   const scanResult = await collectRows(page);
   if (!scanResult.rows.length) {
     console.log('未采集到可写入元素，请确认页面已加载且存在可点击控件。');
@@ -1251,10 +1256,6 @@ async function executeScan(browser: Browser): Promise<void> {
   }
 
   const title = await page.title();
-  if (!normalizeText(title)) {
-    console.log('当前页面标题为空，可能还在加载，请稍后再试。');
-    return;
-  }
 
   const scanResult = await collectRows(page);
   if (!scanResult.rows.length) {
